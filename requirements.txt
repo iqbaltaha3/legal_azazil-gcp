@@ -1,0 +1,9 @@
+# This project is now split into a FastAPI backend and a Streamlit frontend,
+# each with their own dependencies:
+#
+#   pip install -r requirements-backend.txt   # for `uvicorn backend.main:app`
+#   pip install -r requirements-frontend.txt  # for `streamlit run app/chat_app.py`
+#
+# If you're running both on the same machine for local dev, you can just
+# install both files. requirements-migration.txt is only needed once, to
+# run scripts/migrate_chroma_to_supabase.py.

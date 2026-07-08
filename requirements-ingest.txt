@@ -1,0 +1,9 @@
+# For scripts/ingest_*_to_supabase.py -- generating embeddings and writing
+# directly into Supabase/Postgres. No chromadb needed anymore.
+sentence-transformers==3.4.1
+torch==2.5.1
+transformers==4.48.3
+psycopg2-binary==2.9.10
+pgvector==0.3.6
+python-docx==1.1.2
+python-dotenv==1.1.1

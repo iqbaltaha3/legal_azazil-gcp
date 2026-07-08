@@ -1,0 +1,30 @@
+# .dockerignore
+.git
+.gitignore
+.env
+.DS_Store
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+venv-backend/
+venv-frontend/
+data/
+vector_stores/
+metrics.db
+
+# Not needed inside the backend container -- frontend runs on Streamlit
+# Cloud, ingestion scripts run manually/locally.
+app/
+scripts/
+requirements-frontend.txt
+requirements-ingest.txt
+requirements.txt
+README.md
+
+.huggingface/
+.cache/
+
+.pytest_cache/
+.mypy_cache/
+.coverage
