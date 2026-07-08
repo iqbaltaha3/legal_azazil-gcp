@@ -239,4 +239,4 @@ columns are never empty.
 - `utils/supabase_ingest.py` (write-capable) is only ever imported by
   `scripts/ingest_*.py`. `agents/*.py` only imports `utils/supabase_client.py`
   (read-only), so nothing in the running app can accidentally truncate or
-  write to these tables.
+  write to these tables.# test cicd
