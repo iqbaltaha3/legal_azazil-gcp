@@ -7,3 +7,8 @@
 # If you're running both on the same machine for local dev, you can just
 # install both files. requirements-migration.txt is only needed once, to
 # run scripts/migrate_chroma_to_supabase.py.
+
+
+# frontend dependencies
+streamlit==1.47.0
+httpx==0.28.1
