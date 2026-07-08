@@ -9,6 +9,7 @@
 # run scripts/migrate_chroma_to_supabase.py.
 
 
-# frontend dependencies
-streamlit==1.47.0
+# frontnd dependencies
+streamlit==1.45.0
 httpx==0.28.1
+altair<6
