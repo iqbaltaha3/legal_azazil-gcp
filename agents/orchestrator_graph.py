@@ -1,12 +1,8 @@
 # agents/orchestrator_graph.py
 """
 Conversational orchestrator built on LangGraph.
-
-Instead of a fixed sequence of agents, this is a single LLM node that can
-call tools (review_contract, draft_contract, web_search) as needed, loop
-until it has what it needs, then respond in plain text. Intent detection
-happens implicitly through tool selection -- no separate classifier node.
 """
+
 import json
 import time
 from typing import TypedDict, List, Dict, Any
@@ -24,48 +20,19 @@ SYSTEM_PROMPT = """You are Azazil, a legal contract assistant. You have four too
 - review_contract: analyzes a contract clause-by-clause against a database of
   real SEC-filed contracts (CUAD), flagging clauses that are non-standard or
   one-sided, with cited comparisons. For any clause flagged Medium or High
-  severity, it also automatically attaches negotiation guidance (a suggested
-  fallback position / redline, grounded in a negotiation-playbook database)
-  -- this is already built into the tool's output, you don't need a separate
-  call for it.
+  severity, it also automatically attaches negotiation guidance.
 - benchmark_ma_provision: benchmarks M&A / merger-agreement provisions
-  (e.g. termination fees, no-shop clauses, fiduciary-outs, MAC-outs, closing
-  conditions) against the MAUD database of real merger agreements, flagging
-  whether a provision is buyer-favorable, seller-favorable, or market-standard,
-  with cited comparisons. Like review_contract, any provision flagged Medium
-  or High severity/deviation also automatically gets negotiation guidance
-  attached -- already built into the tool's output, no separate call needed.
-  Use this instead of review_contract when the contract in question is a
-  merger agreement / M&A deal document, or when the user specifically asks
-  about M&A deal-point market practice. It accepts either a full agreement
-  or a single pasted provision.
-- draft_contract: drafts a new contract or revises an existing one, always
-  grounded in retrieved contract templates.
+  against the MAUD database.
+- draft_contract: drafts a new contract or revises an existing one.
 - web_search: looks up current information not covered by the contract
-  database (e.g. statutes, recent case law, general legal questions).
+  database.
 
 Rules:
-- If the user provides or references a general commercial contract and wants
-  it checked/analyzed, call review_contract with the full contract text.
-- If the user provides or references a merger agreement / M&A document, or
-  asks about M&A-specific deal points (termination fees, no-shop, fiduciary
-  duties, MAC clauses, etc.), call benchmark_ma_provision instead.
-- When you receive a review_contract or benchmark_ma_provision result, present
-  it to the user ESSENTIALLY VERBATIM -- the executive summary and the full
-  clause/provision-by-clause findings, including severities, cited
-  comparisons, and any attached negotiation guidance. Do not compress it into
-  a vague one-paragraph summary; the per-clause detail is the entire value of
-  these tools. Only lightly reformat for readability if needed.
-- After presenting a review_contract or benchmark_ma_provision result, ALWAYS
-  ask the user if they'd like you to draft a revised version using
-  market-standard clauses. Do not draft automatically.
-- If the user asks you to draft/generate/write a new contract, or says yes to
-  drafting after a review, call draft_contract. If revising after a review,
-  pass the original contract text as source_contract.
-- If the user asks something outside the contract database's scope (current
-  law, recent news, general questions), use web_search.
-- Otherwise, just respond directly -- not every message needs a tool call.
-- Keep responses clear and professional. Do not use emojis.
+- Use review_contract for general commercial contracts.
+- Use benchmark_ma_provision for merger agreements / M&A documents.
+- Present review/benchmark results essentially verbatim.
+- After review, ask if user wants a revised draft.
+- Keep responses clear and professional.
 """
 
 TOOLS = [
@@ -73,7 +40,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "review_contract",
-            "description": "Review a contract clause-by-clause against real SEC-filed contracts, flagging non-standard or one-sided clauses with cited comparisons.",
+            "description": "Review a contract clause-by-clause against real SEC-filed contracts.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -87,11 +54,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "benchmark_ma_provision",
-            "description": "Benchmark M&A / merger-agreement provisions (termination fees, no-shop, fiduciary-outs, MAC-outs, closing conditions, etc.) against the MAUD database of real merger agreements, flagging buyer/seller-favorable or market-standard language with cited comparisons.",
+            "description": "Benchmark M&A provisions against the MAUD database.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "provision_text": {"type": "string", "description": "The M&A provision, or full merger agreement text, to benchmark."}
+                    "provision_text": {"type": "string", "description": "The M&A provision or full agreement text."}
                 },
                 "required": ["provision_text"],
             },
@@ -101,12 +68,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "draft_contract",
-            "description": "Draft a new contract or revise an existing one, grounded in retrieved contract templates.",
+            "description": "Draft or revise a contract.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "instructions": {"type": "string", "description": "What to draft: contract type, parties, term, or which clauses to fix."},
-                    "source_contract": {"type": "string", "description": "Original contract text, if revising after a review. Omit for a brand new draft."},
+                    "instructions": {"type": "string", "description": "What to draft or fix."},
+                    "source_contract": {"type": "string", "description": "Original contract text (optional)."},
                 },
                 "required": ["instructions"],
             },
@@ -116,7 +83,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Search the web for information outside the contract database (current law, case law, general questions).",
+            "description": "Search the web for legal information.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -140,7 +107,16 @@ class ChatState(TypedDict):
     messages: List[Dict[str, Any]]
 
 
-_llm = GroqClient()
+# Lazy initialization to prevent slow startup
+_llm = None
+_graph = None
+
+
+def get_llm():
+    global _llm
+    if _llm is None:
+        _llm = GroqClient()
+    return _llm
 
 
 def agent_node(state: ChatState) -> Dict:
@@ -148,11 +124,11 @@ def agent_node(state: ChatState) -> Dict:
     if not messages or messages[0].get("role") != "system":
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
-    reply = _llm.chat_with_tools(messages, tools=TOOLS, caller="agent")
+    llm = get_llm()
+    reply = llm.chat_with_tools(messages, tools=TOOLS, caller="agent")
+    
     new_message = {"role": "assistant", "content": reply.get("content", "")}
     if reply.get("tool_calls"):
-        # Store in OpenAI/Groq wire format (arguments as JSON string) so this
-        # message can be replayed back to the API on the next turn.
         new_message["tool_calls"] = [
             {
                 "id": tc["id"],
@@ -189,8 +165,12 @@ def tools_node(state: ChatState) -> Dict:
             error = str(e)
             result = f"Tool '{fn}' failed: {e}"
         finally:
-            log_tool_call(tool_name=fn, latency_ms=int((time.time() - start) * 1000),
-                           success=success, error=error)
+            log_tool_call(
+                tool_name=fn,
+                latency_ms=int((time.time() - start) * 1000),
+                success=success,
+                error=error
+            )
 
         tool_messages.append({
             "role": "tool",
@@ -217,16 +197,16 @@ def build_graph():
     return builder.compile()
 
 
-_graph = build_graph()
+def get_graph():
+    global _graph
+    if _graph is None:
+        _graph = build_graph()
+    return _graph
 
 
 def run_turn(history: List[Dict[str, Any]], user_message: str) -> List[Dict[str, Any]]:
-    """
-    Run one turn of conversation. `history` is the prior message list
-    (excluding system prompt -- that's added automatically). Returns the
-    updated message list, which the caller should store and pass back in
-    on the next turn.
-    """
+    """Run one turn of conversation."""
     messages = history + [{"role": "user", "content": user_message}]
-    final_state = _graph.invoke({"messages": messages})
+    graph = get_graph()
+    final_state = graph.invoke({"messages": messages})
     return final_state["messages"]
